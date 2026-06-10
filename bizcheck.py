@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# -*- coding: utf-8 -*-
 """
 BizCheck - 业务检查工具
 域名可用性 | 商标查询 | 公司名查重 | 相似度分析
@@ -15,6 +16,12 @@ import re
 import shutil
 from typing import Optional, List, Dict
 
+# 启用 readline 支持（如果可用），提供更好的输入编辑体验
+try:
+    import readline
+except ImportError:
+    pass
+
 # ============================================================================
 # 1. 基础设施
 # ============================================================================
@@ -29,6 +36,12 @@ class C:
     BOLD = '\033[1m'
     DIM = '\033[2m'
     END = '\033[0m'
+
+def clean_input(text: str) -> str:
+    """清理用户输入，只做最基础的规范化"""
+    # 只做基础的空格规范化，不处理控制字符
+    # 终端已经处理了退格等编辑操作，input() 返回的是最终结果
+    return ' '.join(text.split())
 
 def print_box(title: str, width: int = 45):
     """打印标题框"""
@@ -56,11 +69,14 @@ def get_input(prompt: str, default: str = "") -> str:
     """获取用户输入"""
     try:
         if default:
-            value = input(f"{C.C}{prompt} [{default}]:{C.END} ").strip()
-            return value if value else default
+            value = input(f"{C.C}{prompt} [{default}]:{C.END} ")
         else:
-            value = input(f"{C.C}{prompt}:{C.END} ").strip()
-            return value
+            value = input(f"{C.C}{prompt}:{C.END} ")
+
+        # 清理输入
+        value = clean_input(value)
+
+        return value if value else default
     except (EOFError, KeyboardInterrupt):
         print()
         sys.exit(0)
@@ -90,39 +106,68 @@ def check_domain(domain: str) -> Dict:
 
     result = {'domain': domain, 'available': None, 'registrar': None, 'created': None}
 
-    try:
-        proc = subprocess.run(
-            ['whois', domain],
-            capture_output=True,
-            text=True,
-            timeout=8
-        )
+    # 重试机制：最多2次
+    for attempt in range(2):
+        try:
+            proc = subprocess.run(
+                ['whois', domain],
+                capture_output=True,
+                text=True,
+                timeout=5,
+                encoding='utf-8',
+                errors='replace'
+            )
 
-        out = proc.stdout.lower()
+            out = proc.stdout.lower()
+            err = proc.stderr.lower()
 
-        # 判断可用性（先检查已注册标志，避免误判）
-        if 'registrar:' in out or 'creation date:' in out or 'created:' in out or 'registry domain id:' in out:
-            result['available'] = False
+            # 检查网络错误
+            if 'network is unreachable' in out or 'network is unreachable' in err:
+                if attempt == 0:
+                    continue  # 重试一次
+                result['available'] = None
+                return result
 
-            # 提取注册商
-            m = re.search(r'registrar:\s*(.+)', out)
-            if m:
-                result['registrar'] = m.group(1).strip()
+            # 检查其他错误
+            if 'no whois server' in err or 'connection refused' in err:
+                result['available'] = None
+                return result
 
-            # 提取注册日期
-            m = re.search(r'creat(?:ion|ed) date:\s*(.+)', out)
-            if m:
-                result['created'] = m.group(1).strip()[:10]
-        elif any(k in out for k in ['no match', 'not found', 'no entries found', 'no data found']):
-            result['available'] = True
+            # 判断可用性（先检查已注册标志）
+            if 'registrar:' in out or 'creation date:' in out or 'created:' in out or 'registry domain id:' in out:
+                result['available'] = False
 
-    except subprocess.TimeoutExpired:
-        result['available'] = None
-    except FileNotFoundError:
-        print(f"{C.R}✗ whois 未安装{C.END} (sudo apt install whois)\n")
-        sys.exit(1)
-    except Exception:
-        result['available'] = None
+                # 提取注册商
+                m = re.search(r'registrar:\s*(.+)', out)
+                if m:
+                    result['registrar'] = m.group(1).strip()
+
+                # 提取注册日期
+                m = re.search(r'creat(?:ion|ed) date:\s*(.+)', out)
+                if m:
+                    result['created'] = m.group(1).strip()[:10]
+                break
+            elif any(k in out for k in ['no match', 'not found', 'no entries found', 'no data found']):
+                result['available'] = True
+                break
+            # 空输出也视为查询失败
+            elif not out.strip():
+                if attempt == 0:
+                    continue  # 重试一次
+                result['available'] = None
+            else:
+                break
+
+        except subprocess.TimeoutExpired:
+            if attempt == 0:
+                continue  # 重试一次
+            result['available'] = None
+        except FileNotFoundError:
+            print(f"{C.R}✗ whois 未安装{C.END} (sudo apt install whois)\n")
+            sys.exit(1)
+        except Exception:
+            result['available'] = None
+            break
 
     return result
 
@@ -140,7 +185,8 @@ def print_domain_result(result: Dict):
             print(f" {C.DIM}{result['created']}{C.END}", end='')
         print()
     else:
-        print(f"{C.Y}?{C.END} {C.BOLD}{domain}{C.END} {C.DIM}查询失败{C.END}")
+        print(f"{C.Y}?{C.END} {C.BOLD}{domain}{C.END} {C.DIM}查询失败（网络超时）{C.END}")
+        print(f"  {C.DIM}→ 建议使用在线工具: https://who.is/whois/{domain}{C.END}")
 
 def query_trademark(name: str, country: str = 'CN'):
     """商标查询（提供链接）"""
@@ -245,7 +291,7 @@ def handle_trademark_query():
         print(f"{C.Y}未输入名称{C.END}")
         return
 
-    country = get_input("输入国家代码", "CN")
+    country = get_input("输入国家代码", "CN").upper()
     query_trademark(name, country)
 
 def handle_company_query():
@@ -292,7 +338,7 @@ def handle_full_check():
 
     # 2. 商标查询
     print(f"\n{C.C}[2/4] 商标查询{C.END}")
-    country = get_input("查询国家", "CN")
+    country = get_input("查询国家", "CN").upper()
     print()
     query_trademark(name, country)
 
@@ -337,8 +383,23 @@ def main_menu():
             print(f"{C.C}再见！{C.END}")
             break
         else:
-            print(f"{C.Y}无效选择，请输入 1-5 或 0{C.END}")
-            pause()
+            # 智能识别：如果输入包含域名特征（如 .com），自动进入域名检查
+            if '.' in choice and len(choice) > 3:
+                print(f"{C.C}检测到域名输入，自动进入域名检查...{C.END}\n")
+                print_box("域名可用性检查")
+                domains = re.split(r'[,\s]+', choice)
+                print(f"\n{C.C}正在检查...{C.END}\n")
+                for domain in domains:
+                    if domain:
+                        result = check_domain(domain)
+                        print_domain_result(result)
+                print(f"\n{C.DIM}在线验证（可选）:{C.END}")
+                print(f"{C.DIM}  • https://who.is/whois/<domain>{C.END}")
+                print(f"{C.DIM}  • https://domainanalyzer.com/{C.END}")
+                pause()
+            else:
+                print(f"{C.Y}无效选择，请输入 1-5 或 0{C.END}")
+                pause()
 
 def main():
     """主函数"""
