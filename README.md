@@ -33,7 +33,7 @@ chmod +x ~/Dev/devtools/bizcheck.py
 
 ```bash
 # 创建软链接
-mkdir -p ~/bin
+mkdir -p ~/bin  # 如果目录不存在，先创建
 ln -s ~/Dev/devtools/bizcheck.py ~/bin/bizcheck
 
 # 确保 ~/bin 在 PATH 中
