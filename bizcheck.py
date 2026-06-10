@@ -100,10 +100,8 @@ def check_domain(domain: str) -> Dict:
 
         out = proc.stdout.lower()
 
-        # 判断可用性
-        if any(k in out for k in ['no match', 'not found', 'no entries found', 'available']):
-            result['available'] = True
-        elif 'registrar:' in out or 'creation date:' in out or 'created:' in out:
+        # 判断可用性（先检查已注册标志，避免误判）
+        if 'registrar:' in out or 'creation date:' in out or 'created:' in out or 'registry domain id:' in out:
             result['available'] = False
 
             # 提取注册商
@@ -115,6 +113,8 @@ def check_domain(domain: str) -> Dict:
             m = re.search(r'creat(?:ion|ed) date:\s*(.+)', out)
             if m:
                 result['created'] = m.group(1).strip()[:10]
+        elif any(k in out for k in ['no match', 'not found', 'no entries found', 'no data found']):
+            result['available'] = True
 
     except subprocess.TimeoutExpired:
         result['available'] = None
