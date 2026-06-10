@@ -232,6 +232,11 @@ def handle_domain_check():
             result = check_domain(domain)
             print_domain_result(result)
 
+    # 提供在线验证链接
+    print(f"\n{C.DIM}在线验证（可选）:{C.END}")
+    print(f"{C.DIM}  • https://who.is/whois/<domain>{C.END}")
+    print(f"{C.DIM}  • https://domainanalyzer.com/{C.END}")
+
 def handle_trademark_query():
     """功能2: 商标查询"""
     name = get_input("输入公司名称")
